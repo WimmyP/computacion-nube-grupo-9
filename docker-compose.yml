@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+
+  db-init: # New service for database initialization
+    build: ./backend-tikets/db-init
+    container_name: db-init
+    networks:
+      - tikets-net
+    env_file:
+      - ./backend-tikets/db-init/.env # Use the shared DATABASE_URL
+    profiles: ["init"] # Only run when explicitly requested or by default if no profiles are used
+
+  api-gateway:
+    build: ./backend-tikets/api-gateway
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend-tikets/api-gateway:/app
+      - /app/node_modules
+    networks:
+      - tikets-net
+    depends_on:
+      - users-service
+      - sales-service
+    env_file:
+      - ./backend-tikets/api-gateway/.env
+
+  users-service:
+    build: ./backend-tikets/users-service
+    container_name: users-service
+    restart: unless-stopped
+    volumes:
+      - ./backend-tikets/users-service:/app
+      - /app/node_modules
+    networks:
+      - tikets-net
+    depends_on:
+      - db-init # New dependency
+    env_file:
+      - ./backend-tikets/users-service/.env
+
+  sales-service:
+    build: ./backend-tikets/sales-service
+    container_name: sales-service
+    restart: unless-stopped
+    volumes:
+      - ./backend-tikets/sales-service:/app
+      - /app/node_modules
+    networks:
+      - tikets-net
+    depends_on:
+      - db-init 
+      - redis
+      - rabbitmq
+    env_file:
+      - ./backend-tikets/sales-service/.env
+
+  frontend:
+    build: ./frontend-tikets
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend-tikets:/app
+      - /app/node_modules
+    networks:
+      - tikets-net
+    depends_on:
+      - api-gateway
+    env_file:
+      - ./frontend-tikets/.env
+
+  redis:
+    image: "redis:alpine"
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - tikets-net
+
+  rabbitmq:
+    image: "rabbitmq:3-management-alpine"
+    container_name: rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - tikets-net
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
+    networks:
+      - tikets-net
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka
+    networks:
+      - tikets-net
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+networks:
+  tikets-net:
+    driver: bridge
